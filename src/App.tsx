@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Line, Bar } from 'react-chartjs-2'
 import {
   Chart as ChartJS,
@@ -30,7 +30,7 @@ ChartJS.register(
 )
 
 // Import WASM module (for type definitions)
-import type { run_simulation } from '@doublewordai/inference-lab'
+// Note: types are imported but not used directly in this file
 
 interface SimulationConfig {
   hardware: {
@@ -136,6 +136,10 @@ interface SimulationResults {
     num_decoding: number[]
     prefill_tokens: number[]
     decode_tokens: number[]
+    input_throughput: number[]
+    output_throughput: number[]
+    ttft_p50: number[]
+    tpot_p50: number[]
   }
   distributions: {
     input_lengths: number[]
@@ -438,38 +442,6 @@ function parseBytes(formatted: string): number {
   return value * (units[unit] || 1)
 }
 
-// Helper function to create histogram data from values
-function createHistogram(values: number[], numBins: number = 30): { bins: string[], counts: number[] } {
-  if (values.length === 0) return { bins: [], counts: [] }
-
-  const min = Math.min(...values)
-  const max = Math.max(...values)
-
-  // Handle degenerate case where all values are the same (fixed distribution)
-  if (min === max) {
-    return {
-      bins: [`${Math.round(min)}`],
-      counts: [values.length]
-    }
-  }
-
-  const binSize = (max - min) / numBins
-
-  const counts = new Array(numBins).fill(0)
-  values.forEach(val => {
-    const binIndex = Math.min(Math.floor((val - min) / binSize), numBins - 1)
-    counts[binIndex]++
-  })
-
-  const bins = Array.from({ length: numBins }, (_, i) => {
-    const binStart = min + i * binSize
-    const binEnd = min + (i + 1) * binSize
-    return `${Math.round(binStart)}-${Math.round(binEnd)}`
-  })
-
-  return { bins, counts }
-}
-
 // Generate TOML config string from SimulationConfig
 function generateTOML(config: SimulationConfig): string {
   const hardware = config.hardware
@@ -551,7 +523,7 @@ function App() {
     workload: false,
   })
   const [progressInfo, setProgressInfo] = useState<string>('')
-  const [isStreaming, setIsStreaming] = useState(false)
+  const [_isStreaming, setIsStreaming] = useState(false)
   const [simulationSpeed, setSimulationSpeed] = useState<number>(2) // 0=1x, 1=10x, 2=100x, 3=MAX
 
   // Create Web Worker on mount
@@ -587,7 +559,7 @@ function App() {
   const updateHistogramBins = (
     currentHist: LazyHistogram | null,
     newSamples: number[],
-    metricType: 'ttft' | 'e2e' | 'tpot' | 'input_length' | 'output_length'
+    _metricType: 'ttft' | 'e2e' | 'tpot' | 'input_length' | 'output_length'
   ): LazyHistogram => {
     if (newSamples.length === 0 && currentHist) {
       return currentHist
@@ -792,7 +764,7 @@ function App() {
     setResults(null) // Clear previous results
 
     // Clear histogram state
-    setHistograms({ ttft: null, e2e: null, tpot: null })
+    setHistograms({ ttft: null, e2e: null, tpot: null, input_length: null, output_length: null })
 
     try {
       // Send config to worker to start simulation
