@@ -93,30 +93,24 @@ interface SimulationConfig {
 
 interface SimulationResults {
   metrics: {
+    ttft_min: number
     ttft_mean: number
     ttft_p50: number
     ttft_p90: number
     ttft_p99: number
+    e2e_min: number
     e2e_mean: number
     e2e_p50: number
     e2e_p90: number
     e2e_p99: number
+    per_token_min: number
     per_token_mean: number
     per_token_p50: number
     per_token_p90: number
     per_token_p99: number
     input_tokens_per_sec: number
-    input_tokens_per_sec_p50: number
-    input_tokens_per_sec_p90: number
-    input_tokens_per_sec_p99: number
     output_tokens_per_sec: number
-    output_tokens_per_sec_p50: number
-    output_tokens_per_sec_p90: number
-    output_tokens_per_sec_p99: number
     requests_per_sec: number
-    requests_per_sec_p50: number
-    requests_per_sec_p90: number
-    requests_per_sec_p99: number
     avg_kv_cache_util: number
     avg_flops_util: number
     avg_bandwidth_util: number
@@ -407,6 +401,26 @@ function formatLatency(ms: number): { display: string, full: string, unit: strin
   }
 }
 
+// Helper function to create ordered latency markers
+function createOrderedLatencyMarkers(metrics: {
+  min: number
+  mean: number
+  p50: number
+  p90: number
+  p99: number
+}) {
+  const markers = [
+    { label: 'Min', value: metrics.min, highlightClass: 'min' },
+    { label: 'Mean', value: metrics.mean, highlightClass: 'mean' },
+    { label: 'p50', value: metrics.p50, highlightClass: 'p50' },
+    { label: 'p90', value: metrics.p90, highlightClass: 'p90' },
+    { label: 'p99', value: metrics.p99, highlightClass: 'p99' },
+  ]
+
+  // Sort by value
+  return markers.sort((a, b) => a.value - b.value)
+}
+
 // Helper function to format bytes intelligently
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -525,6 +539,7 @@ function App() {
   const [progressInfo, setProgressInfo] = useState<string>('')
   const [_isStreaming, setIsStreaming] = useState(false)
   const [simulationSpeed, setSimulationSpeed] = useState<number>(2) // 0=1x, 1=10x, 2=100x, 3=MAX
+  const [sidebarOpen, setSidebarOpen] = useState(true)
 
   // Create Web Worker on mount
   const workerRef = useRef<Worker | null>(null)
@@ -636,6 +651,26 @@ function App() {
   const tpotHistogram = lazyHistogramToArrays(histograms.tpot)
   const inputLengthHistogram = lazyHistogramToArrays(histograms.input_length)
   const outputLengthHistogram = lazyHistogramToArrays(histograms.output_length)
+
+  // Set initial sidebar state based on screen size and handle resize
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth <= 1024) {
+        // On mobile: open if no results, closed if there are results
+        setSidebarOpen(!results)
+      } else {
+        // On desktop: always open
+        setSidebarOpen(true)
+      }
+    }
+
+    // Set initial state
+    handleResize()
+
+    // Add resize listener
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [results])
 
   useEffect(() => {
     // Create worker
@@ -827,19 +862,16 @@ function App() {
 
   return (
     <div className="app">
-      <header className="header">
-        <h1>LLM Inference Simulator</h1>
-        <p className="subtitle">High-fidelity simulation of vLLM scheduling and performance</p>
-      </header>
-
       {error && (
         <div className="error">
           <strong>Error:</strong> {error}
         </div>
       )}
 
-      <div className="layout">
-        <div className="config-panel">
+      {sidebarOpen && <div className="sidebar-backdrop" onClick={() => results && setSidebarOpen(false)} />}
+
+      <div className={`layout ${sidebarOpen ? '' : 'sidebar-closed'}`}>
+        <div className={`config-panel ${sidebarOpen ? '' : 'hidden'}`}>
           <div className="panel-header">
             <h2>Configuration</h2>
             <button onClick={resetToDefaults} className="reset-btn-full">Reset to Defaults</button>
@@ -1353,7 +1385,30 @@ function App() {
         {(results || isRunning) && (
           <div className="results-panel">
             <div className="panel-header">
-              <h2>Results</h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <button
+                  className="sidebar-toggle-inline"
+                  onClick={() => setSidebarOpen(!sidebarOpen)}
+                  aria-label="Toggle sidebar"
+                >
+                  {sidebarOpen ? '←' : '☰'}
+                </button>
+                <h2>Results</h2>
+                <button
+                  onClick={runSimulation}
+                  disabled={isRunning || !workerReady}
+                  className="run-button-inline"
+                >
+                  {isRunning ? (
+                    <>
+                      <span className="spinner-small"></span>
+                      Running
+                    </>
+                  ) : (
+                    '▶ Run'
+                  )}
+                </button>
+              </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                   <label style={{
@@ -1478,102 +1533,72 @@ function App() {
                 <div className="metrics-grid">
                   <div className="metric-card latency-card">
                     <div className="metric-label">Time to First Token (TTFT)</div>
-                    <div className="percentile-grid">
-                      <div className="percentile-item">
-                        <div className="percentile-label">Mean</div>
-                        <div className="percentile-value">
-                          {formatLatency(results.metrics.ttft_mean).display}
-                          <span className="percentile-unit">{formatLatency(results.metrics.ttft_mean).unit}</span>
-                        </div>
-                      </div>
-                      <div className="percentile-item p50">
-                        <div className="percentile-label">p50</div>
-                        <div className="percentile-value">
-                          {formatLatency(results.metrics.ttft_p50).display}
-                          <span className="percentile-unit">{formatLatency(results.metrics.ttft_p50).unit}</span>
-                        </div>
-                      </div>
-                      <div className="percentile-item p90">
-                        <div className="percentile-label">p90</div>
-                        <div className="percentile-value">
-                          {formatLatency(results.metrics.ttft_p90).display}
-                          <span className="percentile-unit">{formatLatency(results.metrics.ttft_p90).unit}</span>
-                        </div>
-                      </div>
-                      <div className="percentile-item p99">
-                        <div className="percentile-label">p99</div>
-                        <div className="percentile-value">
-                          {formatLatency(results.metrics.ttft_p99).display}
-                          <span className="percentile-unit">{formatLatency(results.metrics.ttft_p99).unit}</span>
-                        </div>
+                    <div className="latency-line">
+                      <div className="latency-track"></div>
+                      <div className="latency-markers">
+                        {createOrderedLatencyMarkers({
+                          min: results.metrics.ttft_min,
+                          mean: results.metrics.ttft_mean,
+                          p50: results.metrics.ttft_p50,
+                          p90: results.metrics.ttft_p90,
+                          p99: results.metrics.ttft_p99,
+                        }).map((marker, idx) => (
+                          <div key={idx} className={`latency-marker ${marker.highlightClass}`}>
+                            <div className="latency-marker-label">{marker.label}</div>
+                            <div className="latency-marker-value">
+                              {formatLatency(marker.value).display}
+                              <span className="latency-marker-unit">{formatLatency(marker.value).unit}</span>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   </div>
 
                   <div className="metric-card latency-card">
                     <div className="metric-label">End-to-End Latency (E2E)</div>
-                    <div className="percentile-grid">
-                      <div className="percentile-item">
-                        <div className="percentile-label">Mean</div>
-                        <div className="percentile-value">
-                          {formatLatency(results.metrics.e2e_mean).display}
-                          <span className="percentile-unit">{formatLatency(results.metrics.e2e_mean).unit}</span>
-                        </div>
-                      </div>
-                      <div className="percentile-item p50">
-                        <div className="percentile-label">p50</div>
-                        <div className="percentile-value">
-                          {formatLatency(results.metrics.e2e_p50).display}
-                          <span className="percentile-unit">{formatLatency(results.metrics.e2e_p50).unit}</span>
-                        </div>
-                      </div>
-                      <div className="percentile-item p90">
-                        <div className="percentile-label">p90</div>
-                        <div className="percentile-value">
-                          {formatLatency(results.metrics.e2e_p90).display}
-                          <span className="percentile-unit">{formatLatency(results.metrics.e2e_p90).unit}</span>
-                        </div>
-                      </div>
-                      <div className="percentile-item p99">
-                        <div className="percentile-label">p99</div>
-                        <div className="percentile-value">
-                          {formatLatency(results.metrics.e2e_p99).display}
-                          <span className="percentile-unit">{formatLatency(results.metrics.e2e_p99).unit}</span>
-                        </div>
+                    <div className="latency-line">
+                      <div className="latency-track"></div>
+                      <div className="latency-markers">
+                        {createOrderedLatencyMarkers({
+                          min: results.metrics.e2e_min,
+                          mean: results.metrics.e2e_mean,
+                          p50: results.metrics.e2e_p50,
+                          p90: results.metrics.e2e_p90,
+                          p99: results.metrics.e2e_p99,
+                        }).map((marker, idx) => (
+                          <div key={idx} className={`latency-marker ${marker.highlightClass}`}>
+                            <div className="latency-marker-label">{marker.label}</div>
+                            <div className="latency-marker-value">
+                              {formatLatency(marker.value).display}
+                              <span className="latency-marker-unit">{formatLatency(marker.value).unit}</span>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   </div>
 
                   <div className="metric-card latency-card">
                     <div className="metric-label">Time per Output Token (TPOT)</div>
-                    <div className="percentile-grid">
-                      <div className="percentile-item">
-                        <div className="percentile-label">Mean</div>
-                        <div className="percentile-value">
-                          {formatLatency(results.metrics.per_token_mean).display}
-                          <span className="percentile-unit">{formatLatency(results.metrics.per_token_mean).unit}</span>
-                        </div>
-                      </div>
-                      <div className="percentile-item p50">
-                        <div className="percentile-label">p50</div>
-                        <div className="percentile-value">
-                          {formatLatency(results.metrics.per_token_p50).display}
-                          <span className="percentile-unit">{formatLatency(results.metrics.per_token_p50).unit}</span>
-                        </div>
-                      </div>
-                      <div className="percentile-item p90">
-                        <div className="percentile-label">p90</div>
-                        <div className="percentile-value">
-                          {formatLatency(results.metrics.per_token_p90).display}
-                          <span className="percentile-unit">{formatLatency(results.metrics.per_token_p90).unit}</span>
-                        </div>
-                      </div>
-                      <div className="percentile-item p99">
-                        <div className="percentile-label">p99</div>
-                        <div className="percentile-value">
-                          {formatLatency(results.metrics.per_token_p99).display}
-                          <span className="percentile-unit">{formatLatency(results.metrics.per_token_p99).unit}</span>
-                        </div>
+                    <div className="latency-line">
+                      <div className="latency-track"></div>
+                      <div className="latency-markers">
+                        {createOrderedLatencyMarkers({
+                          min: results.metrics.per_token_min,
+                          mean: results.metrics.per_token_mean,
+                          p50: results.metrics.per_token_p50,
+                          p90: results.metrics.per_token_p90,
+                          p99: results.metrics.per_token_p99,
+                        }).map((marker, idx) => (
+                          <div key={idx} className={`latency-marker ${marker.highlightClass}`}>
+                            <div className="latency-marker-label">{marker.label}</div>
+                            <div className="latency-marker-value">
+                              {formatLatency(marker.value).display}
+                              <span className="latency-marker-unit">{formatLatency(marker.value).unit}</span>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   </div>
@@ -1583,106 +1608,19 @@ function App() {
               <div className="metrics-section">
                 <h3>Throughput</h3>
                 <div className="metrics-grid">
-                  <div className="metric-card latency-card">
+                  <div className="metric-card">
                     <div className="metric-label">Input Tokens per Second</div>
-                    <div className="percentile-grid">
-                      <div className="percentile-item">
-                        <div className="percentile-label">Mean</div>
-                        <div className="percentile-value">
-                          {results.metrics.input_tokens_per_sec.toFixed(0)}
-                          <span className="percentile-unit">tok/s</span>
-                        </div>
-                      </div>
-                      <div className="percentile-item p50">
-                        <div className="percentile-label">p50</div>
-                        <div className="percentile-value">
-                          {results.metrics.input_tokens_per_sec_p50.toFixed(0)}
-                          <span className="percentile-unit">tok/s</span>
-                        </div>
-                      </div>
-                      <div className="percentile-item p90">
-                        <div className="percentile-label">p90</div>
-                        <div className="percentile-value">
-                          {results.metrics.input_tokens_per_sec_p90.toFixed(0)}
-                          <span className="percentile-unit">tok/s</span>
-                        </div>
-                      </div>
-                      <div className="percentile-item p99">
-                        <div className="percentile-label">p99</div>
-                        <div className="percentile-value">
-                          {results.metrics.input_tokens_per_sec_p99.toFixed(0)}
-                          <span className="percentile-unit">tok/s</span>
-                        </div>
-                      </div>
-                    </div>
+                    <div className="metric-value">{results.metrics.input_tokens_per_sec.toFixed(0)}<span className="unit">tok/s</span></div>
                   </div>
 
-                  <div className="metric-card latency-card">
+                  <div className="metric-card">
                     <div className="metric-label">Output Tokens per Second</div>
-                    <div className="percentile-grid">
-                      <div className="percentile-item">
-                        <div className="percentile-label">Mean</div>
-                        <div className="percentile-value">
-                          {results.metrics.output_tokens_per_sec.toFixed(0)}
-                          <span className="percentile-unit">tok/s</span>
-                        </div>
-                      </div>
-                      <div className="percentile-item p50">
-                        <div className="percentile-label">p50</div>
-                        <div className="percentile-value">
-                          {results.metrics.output_tokens_per_sec_p50.toFixed(0)}
-                          <span className="percentile-unit">tok/s</span>
-                        </div>
-                      </div>
-                      <div className="percentile-item p90">
-                        <div className="percentile-label">p90</div>
-                        <div className="percentile-value">
-                          {results.metrics.output_tokens_per_sec_p90.toFixed(0)}
-                          <span className="percentile-unit">tok/s</span>
-                        </div>
-                      </div>
-                      <div className="percentile-item p99">
-                        <div className="percentile-label">p99</div>
-                        <div className="percentile-value">
-                          {results.metrics.output_tokens_per_sec_p99.toFixed(0)}
-                          <span className="percentile-unit">tok/s</span>
-                        </div>
-                      </div>
-                    </div>
+                    <div className="metric-value">{results.metrics.output_tokens_per_sec.toFixed(0)}<span className="unit">tok/s</span></div>
                   </div>
 
-                  <div className="metric-card latency-card">
+                  <div className="metric-card">
                     <div className="metric-label">Requests per Second</div>
-                    <div className="percentile-grid">
-                      <div className="percentile-item">
-                        <div className="percentile-label">Mean</div>
-                        <div className="percentile-value">
-                          {results.metrics.requests_per_sec.toFixed(2)}
-                          <span className="percentile-unit">req/s</span>
-                        </div>
-                      </div>
-                      <div className="percentile-item p50">
-                        <div className="percentile-label">p50</div>
-                        <div className="percentile-value">
-                          {results.metrics.requests_per_sec_p50.toFixed(2)}
-                          <span className="percentile-unit">req/s</span>
-                        </div>
-                      </div>
-                      <div className="percentile-item p90">
-                        <div className="percentile-label">p90</div>
-                        <div className="percentile-value">
-                          {results.metrics.requests_per_sec_p90.toFixed(2)}
-                          <span className="percentile-unit">req/s</span>
-                        </div>
-                      </div>
-                      <div className="percentile-item p99">
-                        <div className="percentile-label">p99</div>
-                        <div className="percentile-value">
-                          {results.metrics.requests_per_sec_p99.toFixed(2)}
-                          <span className="percentile-unit">req/s</span>
-                        </div>
-                      </div>
-                    </div>
+                    <div className="metric-value">{results.metrics.requests_per_sec.toFixed(2)}<span className="unit">req/s</span></div>
                   </div>
                 </div>
               </div>
