@@ -1,6 +1,6 @@
 # Inference Lab Web
 
-Interactive web interface for the [Inference Lab](https://github.com/doubleword/inference-lab) LLM inference simulator. Visualize and analyze LLM serving performance in real-time.
+Interactive web interface for the [Inference Lab](https://github.com/doublewordai/inference-lab) LLM inference simulator. Visualize and analyze LLM serving performance in real-time.
 
 ## Features
 
@@ -94,7 +94,7 @@ Tested on Chrome, Firefox, Safari, and Edge.
 
 ## Related Projects
 
-- [Inference Lab](https://github.com/doubleword/inference-lab) - Core simulator (Rust/WASM)
+- [Inference Lab](https://github.com/doublewordai/inference-lab) - Core simulator (Rust/WASM)
 
 ## License
 
@@ -102,4 +102,4 @@ MIT
 
 ## Repository
 
-https://github.com/doubleword/inference-lab-web
+https://github.com/doublewordai/inference-lab-web
