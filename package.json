@@ -11,7 +11,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@doubleword/inference-lab": "^0.1.0",
+    "@doublewordai/inference-lab": "^0.1.1",
     "@types/react-syntax-highlighter": "^15.5.13",
     "chart.js": "^4.5.1",
     "react": "^19.2.0",

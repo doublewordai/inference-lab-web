@@ -1,5 +1,5 @@
 // Web Worker for running simulation in background
-import init, { run_simulation_streaming } from '@doubleword/inference-lab'
+import init, { run_simulation_streaming } from '@doublewordai/inference-lab'
 
 let wasmInitialized = false
 

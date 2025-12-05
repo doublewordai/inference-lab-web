@@ -30,7 +30,7 @@ ChartJS.register(
 )
 
 // Import WASM module (for type definitions)
-import type { run_simulation } from '@doubleword/inference-lab'
+import type { run_simulation } from '@doublewordai/inference-lab'
 
 interface SimulationConfig {
   hardware: {
