@@ -1,6 +1,0 @@
-# Copy this file to .npmrc and replace YOUR_GITHUB_TOKEN with a personal access token
-# To create a token: https://github.com/settings/tokens
-# Required scopes: read:packages
-
-@doublewordai:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=YOUR_GITHUB_TOKEN
