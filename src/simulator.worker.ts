@@ -2,7 +2,7 @@
 import init, { run_simulation_streaming } from '@doublewordai/inference-lab'
 // Explicitly import WASM file so Vite can handle it
 // @ts-ignore
-import wasmUrl from '@doublewordai/inference-lab/pkg/inference_lab_bg.wasm?url'
+import wasmUrl from '@doublewordai/inference-lab/inference_lab_bg.wasm?url'
 
 let wasmInitialized = false
 

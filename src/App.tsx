@@ -612,7 +612,7 @@ function App() {
     scheduler: false,
     workload: false,
   })
-  const [progressInfo, setProgressInfo] = useState<string>('')
+  const [_progressInfo, setProgressInfo] = useState<string>('')
   const [_isStreaming, setIsStreaming] = useState(false)
   const [simulationSpeed, setSimulationSpeed] = useState<number>(2) // 0=1x, 1=10x, 2=100x, 3=MAX
   const [sidebarOpen, setSidebarOpen] = useState(true)
