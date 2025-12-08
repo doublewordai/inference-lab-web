@@ -1,5 +1,8 @@
 // Web Worker for running simulation in background
 import init, { run_simulation_streaming } from '@doublewordai/inference-lab'
+// Explicitly import WASM file so Vite can handle it
+// @ts-ignore
+import wasmUrl from '@doublewordai/inference-lab/pkg/inference_lab_bg.wasm?url'
 
 let wasmInitialized = false
 
@@ -28,7 +31,9 @@ interface ProgressUpdate {
 // Initialize WASM module
 async function initWasm() {
   if (!wasmInitialized) {
-    await init()
+    // Use the explicitly imported WASM URL
+    // Vite will resolve this correctly in both dev (with npm link) and production
+    await init(wasmUrl)
     wasmInitialized = true
   }
 }
