@@ -14,6 +14,7 @@ import {
 } from 'chart.js'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { IoShareSocialOutline, IoPlaySharp, IoStopSharp } from 'react-icons/io5'
 import './App.css'
 
 // Register Chart.js components
@@ -270,6 +271,7 @@ const MODEL_PRESETS: Record<string, SimulationConfig['model']> = {
     num_layers: 80,
     hidden_dim: 8192,
     num_heads: 64,
+    num_kv_heads: 8,
     max_seq_len: 8192,
   },
   'Llama-3-8B': {
@@ -278,6 +280,7 @@ const MODEL_PRESETS: Record<string, SimulationConfig['model']> = {
     num_layers: 32,
     hidden_dim: 4096,
     num_heads: 32,
+    num_kv_heads: 8,
     max_seq_len: 8192,
   },
   'Llama-3.1-405B': {
@@ -286,6 +289,7 @@ const MODEL_PRESETS: Record<string, SimulationConfig['model']> = {
     num_layers: 126,
     hidden_dim: 16384,
     num_heads: 128,
+    num_kv_heads: 8,
     max_seq_len: 8192,
   },
   'Qwen3-30B-A3B': {
@@ -456,6 +460,78 @@ function parseBytes(formatted: string): number {
   return value * (units[unit] || 1)
 }
 
+// Deep diff: returns only the fields that differ from base
+function deepDiff(current: any, base: any): any {
+  if (current === base) return undefined
+  if (typeof current !== 'object' || current === null || typeof base !== 'object' || base === null) {
+    return current
+  }
+
+  const diff: any = {}
+  let hasDiff = false
+
+  for (const key in current) {
+    const currentValue = current[key]
+    const baseValue = base[key]
+
+    if (currentValue !== baseValue) {
+      if (typeof currentValue === 'object' && currentValue !== null && typeof baseValue === 'object' && baseValue !== null) {
+        const nestedDiff = deepDiff(currentValue, baseValue)
+        if (nestedDiff !== undefined) {
+          diff[key] = nestedDiff
+          hasDiff = true
+        }
+      } else {
+        diff[key] = currentValue
+        hasDiff = true
+      }
+    }
+  }
+
+  return hasDiff ? diff : undefined
+}
+
+// Deep merge: merges diff into base
+function deepMerge(base: any, diff: any): any {
+  if (typeof diff !== 'object' || diff === null) {
+    return diff
+  }
+  if (typeof base !== 'object' || base === null) {
+    return diff
+  }
+
+  const result = JSON.parse(JSON.stringify(base)) // Deep clone base
+
+  for (const key in diff) {
+    if (typeof diff[key] === 'object' && diff[key] !== null && typeof result[key] === 'object' && result[key] !== null) {
+      result[key] = deepMerge(result[key], diff[key])
+    } else {
+      result[key] = diff[key]
+    }
+  }
+
+  return result
+}
+
+// Encode config to base64 URL parameter (only changes from default)
+function encodeConfigToURL(config: SimulationConfig): string {
+  const diff = deepDiff(config, DEFAULT_CONFIG)
+  const json = JSON.stringify(diff || {})
+  return btoa(encodeURIComponent(json))
+}
+
+// Decode config from base64 URL parameter (merge changes with default)
+function decodeConfigFromURL(encoded: string): SimulationConfig | null {
+  try {
+    const json = decodeURIComponent(atob(encoded))
+    const diff = JSON.parse(json)
+    return deepMerge(DEFAULT_CONFIG, diff) as SimulationConfig
+  } catch (e) {
+    console.error('Failed to decode config from URL:', e)
+    return null
+  }
+}
+
 // Generate TOML config string from SimulationConfig
 function generateTOML(config: SimulationConfig): string {
   const hardware = config.hardware
@@ -536,10 +612,11 @@ function App() {
     scheduler: false,
     workload: false,
   })
-  const [progressInfo, setProgressInfo] = useState<string>('')
+  const [_progressInfo, setProgressInfo] = useState<string>('')
   const [_isStreaming, setIsStreaming] = useState(false)
   const [simulationSpeed, setSimulationSpeed] = useState<number>(2) // 0=1x, 1=10x, 2=100x, 3=MAX
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarManuallyToggled, setSidebarManuallyToggled] = useState(false)
 
   // Create Web Worker on mount
   const workerRef = useRef<Worker | null>(null)
@@ -655,11 +732,14 @@ function App() {
   // Set initial sidebar state based on screen size and handle resize
   useEffect(() => {
     const handleResize = () => {
+      // Don't auto-toggle if user has manually toggled the sidebar
+      if (sidebarManuallyToggled) return
+
       if (window.innerWidth <= 1024) {
         // On mobile: open if no results, closed if there are results
         setSidebarOpen(!results)
       } else {
-        // On desktop: always open
+        // On desktop: always open (unless manually toggled)
         setSidebarOpen(true)
       }
     }
@@ -670,7 +750,36 @@ function App() {
     // Add resize listener
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
-  }, [results])
+  }, [results, sidebarManuallyToggled])
+
+  // Load config from URL params on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const encodedConfig = params.get('config')
+
+    if (encodedConfig) {
+      const decodedConfig = decodeConfigFromURL(encodedConfig)
+      if (decodedConfig) {
+        setConfig(decodedConfig)
+
+        // Try to match hardware preset
+        const matchedHardware = Object.entries(HARDWARE_PRESETS).find(([_, preset]) =>
+          preset.name === decodedConfig.hardware.name
+        )
+        if (matchedHardware) {
+          setSelectedHardware(matchedHardware[0])
+        }
+
+        // Try to match model preset
+        const matchedModel = Object.entries(MODEL_PRESETS).find(([_, preset]) =>
+          preset.name === decodedConfig.model.name
+        )
+        if (matchedModel) {
+          setSelectedModel(matchedModel[0])
+        }
+      }
+    }
+  }, [])
 
   useEffect(() => {
     // Create worker
@@ -778,6 +887,49 @@ function App() {
     }
   }, [])
 
+  const cancelSimulation = () => {
+    if (workerRef.current) {
+      workerRef.current.terminate()
+      workerRef.current = null
+    }
+    setIsRunning(false)
+    setWorkerReady(false)
+    setProgressInfo('')
+
+    // Reinitialize the worker
+    const worker = new Worker(new URL('./simulator.worker.ts', import.meta.url), {
+      type: 'module',
+    })
+
+    worker.onmessage = (e) => {
+      if (e.data.type === 'initialized') {
+        setWorkerReady(true)
+      } else if (e.data.type === 'progress') {
+        setResults(e.data.data)
+        const progress = e.data.data
+        const progressText = `Time: ${progress.current_time.toFixed(2)}s | Completed: ${progress.completed_requests}/${progress.total_requests} | Running: ${progress.running} | Waiting: ${progress.waiting} | KV Cache: ${(progress.kv_cache_util * 100).toFixed(1)}%`
+        setProgressInfo(progressText)
+      } else if (e.data.type === 'complete') {
+        setResults(e.data.data)
+        setIsRunning(false)
+        setProgressInfo('Simulation complete')
+      } else if (e.data.type === 'error') {
+        setError(e.data.error)
+        setIsRunning(false)
+        setProgressInfo('')
+      }
+    }
+
+    worker.onerror = (err) => {
+      setError(`Worker error: ${err.message}`)
+      setIsRunning(false)
+      setWorkerReady(false)
+    }
+
+    worker.postMessage({ type: 'init' })
+    workerRef.current = worker
+  }
+
   const runSimulation = async () => {
     if (!workerReady) {
       setError("Worker not initialized yet")
@@ -796,7 +948,8 @@ function App() {
     setIsRunning(true)
     setError(null)
     setProgressInfo('Starting simulation...')
-    setResults(null) // Clear previous results
+    // Don't clear results here - let the worker's first update do it
+    // This prevents the sidebar from toggling when clicking Run
 
     // Clear histogram state
     setHistograms({ ttft: null, e2e: null, tpot: null, input_length: null, output_length: null })
@@ -844,6 +997,21 @@ function App() {
     setResults(null)
   }
 
+  const shareConfig = () => {
+    const encoded = encodeConfigToURL(config)
+    const url = new URL(window.location.href)
+    url.searchParams.set('config', encoded)
+    const shareableURL = url.toString()
+
+    // Update browser URL without reload
+    window.history.pushState({}, '', shareableURL)
+
+    // Copy to clipboard
+    navigator.clipboard.writeText(shareableURL)
+      .then(() => alert('Shareable link copied to clipboard!'))
+      .catch(() => alert('Failed to copy to clipboard'))
+  }
+
   const updateConfig = (path: string[], value: any) => {
     setConfig((prev) => {
       const newConfig = JSON.parse(JSON.stringify(prev))
@@ -868,13 +1036,17 @@ function App() {
         </div>
       )}
 
-      {sidebarOpen && <div className="sidebar-backdrop" onClick={() => results && setSidebarOpen(false)} />}
+      {sidebarOpen && <div className="sidebar-backdrop" onClick={() => {
+        if (results) {
+          setSidebarOpen(false)
+          setSidebarManuallyToggled(true)
+        }
+      }} />}
 
       <div className={`layout ${sidebarOpen ? '' : 'sidebar-closed'}`}>
         <div className={`config-panel ${sidebarOpen ? '' : 'hidden'}`}>
           <div className="panel-header">
             <h2>Configuration</h2>
-            <button onClick={resetToDefaults} className="reset-btn-full">Reset to Defaults</button>
           </div>
 
           <div className="config-sections">
@@ -1365,124 +1537,154 @@ function App() {
           </div>
 
           <button
-            onClick={runSimulation}
-            disabled={isRunning || !workerReady}
-            className="run-button"
+            onClick={isRunning ? cancelSimulation : runSimulation}
+            disabled={!workerReady && !isRunning}
+            className={`run-button ${isRunning ? 'running' : ''}`}
           >
             {isRunning ? (
               <>
                 <span className="spinner"></span>
-                Running Simulation...
+                <span className="button-text">Running...</span>
+                <span className="button-text-hover"><IoStopSharp size={16} /> Stop</span>
               </>
             ) : workerReady ? (
-              '▶ Run Simulation'
+              <><IoPlaySharp size={16} /> Run Simulation</>
             ) : (
               'Initializing Worker...'
             )}
+          </button>
+          <button onClick={resetToDefaults} className="reset-btn-full">
+            Reset to Defaults
           </button>
         </div>
 
         {(results || isRunning) && (
           <div className="results-panel">
             <div className="panel-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                <button
-                  className="sidebar-toggle-inline"
-                  onClick={() => setSidebarOpen(!sidebarOpen)}
-                  aria-label="Toggle sidebar"
-                >
-                  {sidebarOpen ? '←' : '☰'}
-                </button>
-                <h2>Results</h2>
-                <button
-                  onClick={runSimulation}
-                  disabled={isRunning || !workerReady}
-                  className="run-button-inline"
-                >
-                  {isRunning ? (
-                    <>
-                      <span className="spinner-small"></span>
-                      Running
-                    </>
-                  ) : (
-                    '▶ Run'
-                  )}
-                </button>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <label style={{
-                    fontSize: '0.75rem',
-                    color: 'var(--gray-600)',
-                    whiteSpace: 'nowrap',
-                    fontWeight: 500
-                  }}>
-                    Simulation Speed:
-                  </label>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                    <input
-                      type="range"
-                      min="0"
-                      max="3"
-                      step="1"
-                      value={simulationSpeed}
-                      onChange={(e) => setSimulationSpeed(parseInt(e.target.value))}
-                      disabled={isRunning}
-                      list="speed-markers"
-                      style={{ width: '150px', margin: 0 }}
-                    />
-                    <datalist id="speed-markers">
-                      <option value="0"></option>
-                      <option value="1"></option>
-                      <option value="2"></option>
-                      <option value="3"></option>
-                    </datalist>
-                    <div style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      width: '150px',
-                      fontSize: '0.65rem',
-                      color: 'var(--gray-500)',
-                      fontFamily: 'monospace',
-                      paddingLeft: '2px',
-                      paddingRight: '2px'
-                    }}>
-                      <span style={{ fontWeight: simulationSpeed === 0 ? 600 : 400 }}>1x</span>
-                      <span style={{ fontWeight: simulationSpeed === 1 ? 600 : 400 }}>10x</span>
-                      <span style={{ fontWeight: simulationSpeed === 2 ? 600 : 400 }}>100x</span>
-                      <span style={{ fontWeight: simulationSpeed === 3 ? 600 : 400 }}>MAX</span>
-                    </div>
+              <div className="panel-header-content">
+                <div className="panel-header-left">
+                  <button
+                    className="sidebar-toggle-inline"
+                    onClick={() => {
+                      setSidebarOpen(!sidebarOpen)
+                      setSidebarManuallyToggled(true)
+                    }}
+                    aria-label="Toggle sidebar"
+                  >
+                    {sidebarOpen ? '←' : '☰'}
+                  </button>
+                  <h2>Results</h2>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                      onClick={isRunning ? cancelSimulation : runSimulation}
+                      disabled={!workerReady && !isRunning}
+                      className={`run-button-inline ${isRunning ? 'running' : ''}`}
+                    >
+                      {isRunning ? (
+                        <>
+                          <span className="spinner-small"></span>
+                          <span className="button-text">Running</span>
+                          <span className="button-text-hover"><IoStopSharp size={16} /> Stop</span>
+                        </>
+                      ) : (
+                        <><IoPlaySharp size={16} /> Run</>
+                      )}
+                    </button>
+                    <button
+                      onClick={shareConfig}
+                      className="icon-button"
+                      style={{ padding: '0.5rem 0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      title="Share configuration"
+                      aria-label="Share configuration"
+                    >
+                      <IoShareSocialOutline size={18} />
+                    </button>
                   </div>
                 </div>
-                {results && (
-                  <div className="completion-badge" style={{
-                    position: 'relative',
-                    overflow: 'hidden',
-                    fontSize: '0.85rem',
-                    fontFamily: 'inherit'
-                  }}>
-                    {isRunning && (
+                <div className="panel-header-controls">
+                  <div className="speed-control" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <label style={{
+                      fontSize: '0.75rem',
+                      color: 'var(--gray-600)',
+                      whiteSpace: 'nowrap',
+                      fontWeight: 500
+                    }}>
+                      Simulation Speed:
+                    </label>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      <input
+                        type="range"
+                        min="0"
+                        max="3"
+                        step="1"
+                        value={simulationSpeed}
+                        onChange={(e) => setSimulationSpeed(parseInt(e.target.value))}
+                        disabled={isRunning}
+                        list="speed-markers"
+                        style={{ width: '150px', margin: 0 }}
+                      />
+                      <datalist id="speed-markers">
+                        <option value="0"></option>
+                        <option value="1"></option>
+                        <option value="2"></option>
+                        <option value="3"></option>
+                      </datalist>
+                      <div style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        width: '150px',
+                        fontSize: '0.65rem',
+                        color: 'var(--gray-500)',
+                        fontFamily: 'monospace',
+                        paddingLeft: '2px',
+                        paddingRight: '2px'
+                      }}>
+                        <span style={{ fontWeight: simulationSpeed === 0 ? 600 : 400 }}>1x</span>
+                        <span style={{ fontWeight: simulationSpeed === 1 ? 600 : 400 }}>10x</span>
+                        <span style={{ fontWeight: simulationSpeed === 2 ? 600 : 400 }}>100x</span>
+                        <span style={{ fontWeight: simulationSpeed === 3 ? 600 : 400 }}>MAX</span>
+                      </div>
+                    </div>
+                  </div>
+                  {results && (
+                    <div className="progress-bar-wrapper" style={{
+                      background: 'var(--gray-200)',
+                      borderRadius: '16px',
+                      overflow: 'hidden',
+                      position: 'relative',
+                      height: '32px',
+                      minWidth: '180px',
+                      flex: '0 0 200px'
+                    }}>
                       <div style={{
                         position: 'absolute',
                         left: 0,
                         top: 0,
                         bottom: 0,
-                        width: `${(results.metrics.completed_requests / results.metrics.total_requests) * 100}%`,
-                        background: 'rgba(255, 255, 255, 0.25)',
+                        width: `${(results.metrics.completed_requests / config.workload.num_requests) * 100}%`,
+                        background: 'var(--success)',
                         transition: 'width 0.2s ease',
-                        zIndex: 0
                       }} />
-                    )}
-                    <span style={{ position: 'relative', zIndex: 1 }}>
-                      {results.metrics.completed_requests}/{results.metrics.total_requests} requests
-                      {progressInfo && (
-                        <span style={{ opacity: 0.9, fontSize: '0.8em', marginLeft: '0.5rem' }}>
-                          • {progressInfo.replace('Time: ', '').replace('Completed: ', '').replace(/\d+\/\d+ \| /, '')}
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                )}
+                      <div style={{
+                        position: 'relative',
+                        zIndex: 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        height: '100%',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        color: 'white',
+                        padding: '0 0.5rem',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                      }}>
+                        {results.metrics.completed_requests}/{config.workload.num_requests} requests
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
